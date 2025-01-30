@@ -23,23 +23,23 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: '20.x'
-          cache: 'npm'  # `node_modules` をキャッシュしてインストール時間を短縮
+          cache: 'npm'  # `node_modules` のキャッシュを有効化
 
       - name: Install dependencies
         run: npm install
 
-      - name: Build project
+      - name: Build Next.js project
         run: npm run build
         env:
-          NODE_ENV: production  # 環境変数を設定
+          NODE_ENV: production
 
-      - name: Run tests
+      - name: Run tests (if available)
         run: npm run test --if-present
 
       - name: Create deployment package
         run: |
           mkdir -p release
-          cp -r .next public package.json package-lock.json .env.production release/
+          cp -r .next public package.json package-lock.json release/
           cd release
           zip -r ../release.zip .
 
