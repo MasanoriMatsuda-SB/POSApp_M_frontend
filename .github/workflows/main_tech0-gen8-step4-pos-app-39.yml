@@ -67,7 +67,7 @@ jobs:
 
       - name: Set Azure App Service build settings
         run: |
-          az webapp config appsettings set --name tech0-gen8-step4-pos-app-39 --resource-group <RESOURCE_GROUP> --settings SCM_DO_BUILD_DURING_DEPLOYMENT=true
+          az webapp config appsettings set --name tech0-gen8-step4-pos-app-39 --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} --settings SCM_DO_BUILD_DURING_DEPLOYMENT=true
 
       - name: Deploy to Azure Web App
         id: deploy-to-webapp
@@ -82,3 +82,4 @@ jobs:
         run: |
           sleep 10  # 少し待機してからチェック
           curl -f https://tech0-gen8-step4-pos-app-39.azurewebsites.net || exit 1
+
