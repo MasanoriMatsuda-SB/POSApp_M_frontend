@@ -13,35 +13,27 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read # This is required for actions/checkout
+      contents: read #This is required for actions/checkout
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Node.js version
         uses: actions/setup-node@v3
         with:
           node-version: '20.x'
-          cache: 'npm'  # `node_modules` のキャッシュを有効化
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build Next.js project
-        run: npm run build
-        env:
-          NODE_ENV: production
-
-      - name: Run tests (if available)
-        run: npm run test --if-present
-
-      - name: Create deployment package
+      - name: Copy artifact for deployment job
+         run: |
+              mkdir 
+              deploy cp -r ./.next/standalone/. ./deploy cp -r ./public 
+              ./deploy cp -r ./.next/static/. ./deploy/.next/static
+      - name: npm install, build, and test
         run: |
-          mkdir -p release
-          cp -r .next public package.json package-lock.json release/
-          cd release
-          zip -r ../release.zip .
+          npm install
+          npm run build --if-present
+          npm run test --if-present
+      - name: Zip artifact for deployment
+        run: zip release.zip ./deploy -r
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
@@ -64,12 +56,8 @@ jobs:
 
       - name: Unzip artifact for deployment
         run: unzip release.zip
-
-      - name: Set Azure App Service build settings
-        run: |
-          az webapp config appsettings set --name tech0-gen8-step4-pos-app-39 --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} --settings SCM_DO_BUILD_DURING_DEPLOYMENT=true
-
-      - name: Deploy to Azure Web App
+      
+      - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v3
         with:
@@ -77,9 +65,3 @@ jobs:
           slot-name: 'Production'
           package: .
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_36E44AC8A30E4B7FA64D1290D66E2C0B }}
-
-      - name: Verify deployment
-        run: |
-          sleep 10  # 少し待機してからチェック
-          curl -f https://tech0-gen8-step4-pos-app-39.azurewebsites.net || exit 1
-
