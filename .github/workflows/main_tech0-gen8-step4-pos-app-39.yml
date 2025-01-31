@@ -14,8 +14,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Node.js version
         uses: actions/setup-node@v3
@@ -51,11 +50,6 @@ jobs:
       url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
 
     steps:
-      - name: Azure Login
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
       - name: Download artifact from build job
         uses: actions/download-artifact@v4
         with:
@@ -63,10 +57,6 @@ jobs:
 
       - name: Unzip artifact for deployment
         run: unzip release.zip
-
-      - name: Extend Azure Container Start Time Limit
-        run: |
-          az webapp config appsettings set --name tech0-gen8-step4-pos-app-39 --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} --settings WEBSITES_CONTAINER_START_TIME_LIMIT=600
 
       - name: Deploy to Azure Web App
         id: deploy-to-webapp
@@ -76,4 +66,3 @@ jobs:
           slot-name: 'Production'
           package: .
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_36E44AC8A30E4B7FA64D1290D66E2C0B }}
-
