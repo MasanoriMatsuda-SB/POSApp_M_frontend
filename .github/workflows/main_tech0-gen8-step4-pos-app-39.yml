@@ -12,8 +12,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read #This is required for actions/checkout
 
     steps:
       - uses: actions/checkout@v4
@@ -22,19 +20,26 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: '20.x'
-      - name: npm install, build, and test
-        run: |
-          npm install
-          npm run build --if-present
-          npm run test --if-present
-      - name: Copy artifact for deployment job
-        run: |
-          mkdir deploy
-          cp -r ./.next/standalone/. ./deploy 
-          cp -r ./public ./deploy
-          cp -r ./.next/static/. ./deploy/.next/static    
+
+      - name: Install dependencies
+        run: npm install
+
+      # ↓ require-hookをインストールする例（非推奨）
+      - name: Install require-hook
+        run: npm install require-hook
+
+      - name: Build
+        run: npm run build
+
+      - name: Check build output
+        run: ls -la
+
+      # 必要ならテストを実行（テストスクリプトがある場合）
+      - name: Test (optional)
+        run: npm run test --if-present
+
       - name: Zip artifact for deployment
-        run: zip release.zip ./deploy -r
+        run: zip -r release.zip .
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
@@ -48,7 +53,7 @@ jobs:
     environment:
       name: 'Production'
       url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
-    
+
     steps:
       - name: Download artifact from build job
         uses: actions/download-artifact@v4
@@ -57,12 +62,12 @@ jobs:
 
       - name: Unzip artifact for deployment
         run: unzip release.zip
-      
+
       - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v3
         with:
-          app-name: 'tech0-gen8-step4-pos-app-39'
+          app-name: 'tech0-gen-8-step3-app-node-9'
           slot-name: 'Production'
           package: .
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_36E44AC8A30E4B7FA64D1290D66E2C0B }}
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_AD82227A98174027ADAD107D12BFD564 }}
