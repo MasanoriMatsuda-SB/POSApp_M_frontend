@@ -2,7 +2,6 @@
 import { useEffect, useState } from 'react';
 import { BrowserMultiFormatReader, IScannerControls } from '@zxing/browser';
 
-// 商品マスタ用の型 (バックエンドのAPIに合わせて調整)
 interface Product {
   PRD_ID: number;
   CODE: string;
@@ -10,7 +9,6 @@ interface Product {
   PRICE: number;
 }
 
-// 取引テーブル (レスポンス例)
 interface Transaction {
   TRD_ID: number;
   DATETIME: string;
@@ -20,45 +18,41 @@ interface Transaction {
   TOTAL_AMT: number;
 }
 
-// カート表示用の型 (名称, 単価, 合計(＝単価×数量)など)
 interface CartItem {
   CODE: string;
   NAME: string;
   PRICE: number;
-  quantity: number;  // 今回は1で固定、再スキャンで行追加
+  quantity: number;
 }
 
 export default function HomePage() {
-  // バックエンドAPIのURLを.env.localから取得
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_API_URL || 'https://tech0-gen8-step4-pos-app-40.azurewebsites.net';
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_API_URL || 'https://example.azurewebsites.net';
 
-  // 取引ID（最初に取引を作成して取得しておく）
   const [transactionId, setTransactionId] = useState<number | null>(null);
 
-  // ===== ①商品コード入力 or スキャンで取得 =====
+  // 入力またはバーコード読み取りで得た商品コード
   const [productCode, setProductCode] = useState('');
-  // 読み込み結果
+  // 最後に読み取った商品情報
   const [foundProduct, setFoundProduct] = useState<Product | null>(null);
   const [productError, setProductError] = useState('');
 
-  // ===== カート =====
+  // 購入リスト
   const [cart, setCart] = useState<CartItem[]>([]);
 
-  // ===== スキャン関連 =====
+  // スキャン関連
   const [isScanning, setIsScanning] = useState(false);
   const [scannerControls, setScannerControls] = useState<IScannerControls | null>(null);
 
-  // ========== 初回マウント時に「新規取引」を作成 ==========
+  // ========== (1) 新規取引の作成 (マウント時に一度だけ) ==========
   useEffect(() => {
-    async function createNewTransaction() {
+    const createTransaction = async () => {
       try {
         const now = new Date().toISOString();
-        // バックエンドへPOST (必要に応じてEMP_CD, STORE_CDなどを送る)
         const body = {
           DATETIME: now,
           EMP_CD: 'EMP01',
-          STORE_CD: '30',  // フロント側で固定
-          POS_NO: '90',    // フロント側で固定
+          STORE_CD: '30',
+          POS_NO: '90',
           TOTAL_AMT: 0,
         };
         const res = await fetch(`${backendUrl}/api/transactions`, {
@@ -76,43 +70,78 @@ export default function HomePage() {
       } catch (error) {
         console.error('取引作成エラー:', error);
       }
-    }
-    createNewTransaction();
+    };
+    createTransaction();
   }, [backendUrl]);
 
-  // ========== ②商品コード 読み込み (既存の処理) ==========
-  const handleReadCode = async () => {
-    if (!productCode) return; // 入力が空なら処理しない
-
+  // ========== 商品コードをキーに商品情報を取得 & 自動でカート追加 ==========
+  const fetchProductByCode = async (code: string) => {
+    if (!code) return;
     setFoundProduct(null);
     setProductError('');
 
     try {
-      const res = await fetch(`${backendUrl}/api/products-by-code/${productCode}`);
+      const res = await fetch(`${backendUrl}/api/products-by-code/${code}`);
       if (res.status === 404) {
         setFoundProduct(null);
         setProductError('商品がマスタ未登録です');
         return;
       }
       if (!res.ok) {
+        const text = await res.text();
+        console.error('fetchProductByCode error:', text);
         alert('商品検索に失敗しました');
         return;
       }
       const data: Product = await res.json();
+      // 取得成功 → foundProduct更新
       setFoundProduct(data);
       setProductError('');
+      // 自動で購入リストへ追加 (同じ商品コードがあれば数量+1)
+      autoAddToCart(data);
     } catch (error) {
       console.error('商品コード読み込みエラー:', error);
       alert('読み込みに失敗しました');
     }
   };
 
-  // ========== ③ スキャンボタン (トグル) ==========
+  // ========== (2) 自動カート追加: 同じ商品コードなら数量+1, なければ追加 ==========
+  const autoAddToCart = (product: Product) => {
+    setCart((prevCart) => {
+      const existingIndex = prevCart.findIndex(item => item.CODE === product.CODE);
+      if (existingIndex !== -1) {
+        // 同じコードの商品が既にある → 数量+1
+        const updatedCart = [...prevCart];
+        updatedCart[existingIndex] = {
+          ...updatedCart[existingIndex],
+          quantity: updatedCart[existingIndex].quantity + 1,
+        };
+        return updatedCart;
+      } else {
+        // 新規追加
+        return [
+          ...prevCart,
+          {
+            CODE: product.CODE,
+            NAME: product.NAME,
+            PRICE: product.PRICE,
+            quantity: 1,
+          }
+        ];
+      }
+    });
+  };
+
+  // ========== (3) 手動入力: 読み込みボタンで商品取得 ==========
+  const handleManualRead = () => {
+    fetchProductByCode(productCode);
+  };
+
+  // ========== (4) スキャン開始/停止 ==========
   const handleToggleScan = () => {
     if (!isScanning) {
-      setIsScanning(true);  // スキャン開始
+      setIsScanning(true);
     } else {
-      // スキャン中なら停止
       if (scannerControls) {
         scannerControls.stop();
         setScannerControls(null);
@@ -121,43 +150,41 @@ export default function HomePage() {
     }
   };
 
-  // ========== ④ useEffectでカメラ起動 & バーコード解析 ==========
+  // ========== カメラ起動 & バーコード解析: 成功したら自動 fetchProductByCode ==========
   useEffect(() => {
-    if (!isScanning) {
-      return;
-    }
+    if (!isScanning) return;
     const codeReader = new BrowserMultiFormatReader();
     const videoElement = document.getElementById('video-preview') as HTMLVideoElement | null;
     if (!videoElement) return;
 
     codeReader.decodeFromVideoDevice(undefined, videoElement, (result, error, controls) => {
       if (result) {
-        // バーコードを読み取れたら
-        const text = result.getText();
-        console.log('Scanned code:', text);
+        const scannedCode = result.getText();
+        console.log('Scanned code:', scannedCode);
+
         // カメラ停止
         if (controls) {
           controls.stop();
           setScannerControls(null);
         }
         setIsScanning(false);
-        // 読み取ったコードを productCode にセット → すぐに handleReadCode 実行
-        setProductCode(text);
-        setTimeout(() => {
-          handleReadCode();
-        }, 0);
+
+        // 自動取得 → カートに入れる
+        setProductCode(scannedCode);
+        fetchProductByCode(scannedCode);
       }
+      // errorは頻繁に出るのでログ抑制
     })
     .then((controls) => {
       setScannerControls(controls);
     })
     .catch((err) => {
       console.error('Camera access error:', err);
-      alert('カメラにアクセスできません。HTTPSでアクセスしているかご確認ください。');
+      alert('カメラにアクセスできません。HTTPSでアクセスしているかをご確認ください。');
       setIsScanning(false);
     });
 
-    // クリーンアップ: コンポーネントがアンマウントされたらカメラ停止
+    // アンマウント時にカメラ停止
     return () => {
       if (scannerControls) {
         scannerControls.stop();
@@ -165,55 +192,34 @@ export default function HomePage() {
     };
   }, [isScanning]);
 
-  // ========== ⑤ 購入リストへ追加 ==========
-  const handleAddToCart = async () => {
-    if (!transactionId) {
-      alert('取引IDが取得できていません');
-      return;
-    }
-    if (!foundProduct) {
-      alert('商品が読み込まれていません');
-      return;
-    }
-
-    try {
-      const detailBody = {
-        DTL_ID: cart.length + 1,
-        PRD_ID: foundProduct.PRD_ID,
-        PRD_CODE: foundProduct.CODE,
-        PRD_NAME: foundProduct.NAME,
-        PRD_PRICE: foundProduct.PRICE,
-      };
-      const res = await fetch(`${backendUrl}/api/transactions/${transactionId}/details`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(detailBody),
-      });
-      if (!res.ok) {
-        alert('購入リストへの追加に失敗しました');
-        return;
-      }
-
-      // カートに1行追加 (数量は1で固定)
-      const newItem: CartItem = {
-        CODE: foundProduct.CODE,
-        NAME: foundProduct.NAME,
-        PRICE: foundProduct.PRICE,
-        quantity: 1,
-      };
-      setCart((prev) => [...prev, newItem]);
-
-      // リセット
-      setProductCode('');
-      setFoundProduct(null);
-      setProductError('');
-    } catch (error) {
-      console.error('購入リスト追加エラー:', error);
-      alert('購入リスト追加でエラーが発生しました');
-    }
+  // ========== (5) 購入リスト: アイテム削除 ==========
+  const handleRemoveFromCart = (code: string) => {
+    setCart((prevCart) => prevCart.filter(item => item.CODE !== code));
   };
 
-  // ========== ⑥ 購入 ==========
+  // ========== (6) 購入リスト: 数量変更 (1～99) ==========
+  const handleChangeQuantity = (code: string) => {
+    // ユーザーに新しい数量を入力させる例: window.prompt (シンプル実装)
+    const newQtyStr = window.prompt("数量を入力 (1～99)", "1");
+    if (!newQtyStr) return; // キャンセルや空入力
+    const newQty = parseInt(newQtyStr, 10);
+    if (Number.isNaN(newQty) || newQty < 1 || newQty > 99) {
+      alert("数量は1～99の範囲で入力してください。");
+      return;
+    }
+
+    setCart((prevCart) => {
+      return prevCart.map((item) => {
+        if (item.CODE === code) {
+          return { ...item, quantity: newQty };
+        } else {
+          return item;
+        }
+      });
+    });
+  };
+
+  // ========== (7) 購入確定 ==========
   const handlePurchase = async () => {
     if (!transactionId) return;
     try {
@@ -226,7 +232,7 @@ export default function HomePage() {
       const totalTaxIncluded = Math.round(data.TOTAL_AMT * 1.1);
       alert(`購入が完了しました！\n合計金額（税込）: ${totalTaxIncluded} 円`);
 
-      // カートをクリア & コード入力欄もリセット
+      // カートをクリア
       setCart([]);
       setProductCode('');
       setFoundProduct(null);
@@ -236,14 +242,14 @@ export default function HomePage() {
     }
   };
 
-  // ========== 合計金額(税抜)をフロント側でも計算して表示したい場合 ==========
+  // 合計金額(税抜) (フロント側で表示用)
   const totalWithoutTax = cart.reduce((sum, item) => sum + item.PRICE * item.quantity, 0);
 
   return (
     <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto' }}>
       <h1>Web画面POSアプリ</h1>
 
-      {/* ========== スキャン開始/停止 ボタン ========== */}
+      {/* スキャン開始/停止 ボタン */}
       <button onClick={handleToggleScan} style={{ marginBottom: '8px' }}>
         {isScanning ? 'スキャン停止' : 'バーコードスキャン'}
       </button>
@@ -258,7 +264,7 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* ①コード入力エリア + 読み込みボタン */}
+      {/* 手入力エリア + 読み込みボタン */}
       <div style={{ marginBottom: '8px' }}>
         <input
           type="text"
@@ -267,10 +273,12 @@ export default function HomePage() {
           onChange={(e) => setProductCode(e.target.value)}
           style={{ width: '200px', marginRight: '8px' }}
         />
-        <button onClick={handleReadCode}>商品コード 読み込み</button>
+        <button onClick={handleManualRead}>
+          商品コード 読み込み
+        </button>
       </div>
 
-      {/* ③名称表示エリア / ④単価表示エリア */}
+      {/* 名称／単価表示 */}
       <div style={{ marginBottom: '8px' }}>
         {productError ? (
           <p style={{ color: 'red' }}>{productError}</p>
@@ -288,29 +296,44 @@ export default function HomePage() {
               value={`${foundProduct.PRICE}円`}
               style={{ display: 'block', marginBottom: '4px' }}
             />
+            <p style={{ color: 'blue' }}>自動的に購入リストに追加しました</p>
           </>
         ) : (
           <p style={{ color: '#666' }}>名称／単価がここに表示されます</p>
         )}
       </div>
 
-      {/* ⑤購入リストへ追加ボタン */}
-      <button onClick={handleAddToCart} style={{ marginBottom: '16px' }}>
-        追加
-      </button>
-
-      {/* カート */}
+      {/* 購入リスト */}
       <div style={{ border: '1px solid #ccc', padding: '10px', marginBottom: '8px' }}>
         <h3>購入リスト</h3>
         {cart.length === 0 ? (
           <p>リストが空です</p>
         ) : (
           <ul>
-            {cart.map((item, idx) => {
+            {cart.map((item) => {
               const lineTotal = item.PRICE * item.quantity;
               return (
-                <li key={idx}>
-                  {item.NAME} × {item.quantity}　{item.PRICE}円　{lineTotal}円
+                <li key={item.CODE} style={{ marginBottom: '8px' }}>
+                  {item.NAME}　
+                  単価: {item.PRICE}円　
+                  数量: {item.quantity}　
+                  小計: {lineTotal}円
+
+                  {/* リストから削除 */}
+                  <button
+                    style={{ marginLeft: '8px' }}
+                    onClick={() => handleRemoveFromCart(item.CODE)}
+                  >
+                    リストから削除
+                  </button>
+
+                  {/* 数量変更 */}
+                  <button
+                    style={{ marginLeft: '8px' }}
+                    onClick={() => handleChangeQuantity(item.CODE)}
+                  >
+                    数量変更
+                  </button>
                 </li>
               );
             })}
