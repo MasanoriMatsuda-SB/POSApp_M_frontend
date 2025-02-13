@@ -1,5 +1,6 @@
 // src/pages/index.tsx
 import { useEffect, useState } from 'react';
+import { BrowserMultiFormatReader, IScannerControls } from '@zxing/browser';
 
 // 商品マスタ用の型 (バックエンドのAPIに合わせて調整)
 interface Product {
@@ -34,15 +35,18 @@ export default function HomePage() {
   // 取引ID（最初に取引を作成して取得しておく）
   const [transactionId, setTransactionId] = useState<number | null>(null);
 
-  // ①商品コード入力
+  // ===== ①商品コード入力 or スキャンで取得 =====
   const [productCode, setProductCode] = useState('');
-  // ②読み込みボタン押下後に取得する商品情報
+  // 読み込み結果
   const [foundProduct, setFoundProduct] = useState<Product | null>(null);
-  // 商品が存在しなかった場合のメッセージ ("商品がマスタ未登録です")
   const [productError, setProductError] = useState('');
 
-  // ⑥購入品リスト（カート）
+  // ===== カート =====
   const [cart, setCart] = useState<CartItem[]>([]);
+
+  // ===== スキャン関連 =====
+  const [isScanning, setIsScanning] = useState(false);
+  const [scannerControls, setScannerControls] = useState<IScannerControls | null>(null);
 
   // ========== 初回マウント時に「新規取引」を作成 ==========
   useEffect(() => {
@@ -53,8 +57,8 @@ export default function HomePage() {
         const body = {
           DATETIME: now,
           EMP_CD: 'EMP01',
-          STORE_CD: '30',
-          POS_NO: '90',
+          STORE_CD: '30',  // フロント側で固定
+          POS_NO: '90',    // フロント側で固定
           TOTAL_AMT: 0,
         };
         const res = await fetch(`${backendUrl}/api/transactions`, {
@@ -76,7 +80,7 @@ export default function HomePage() {
     createNewTransaction();
   }, [backendUrl]);
 
-  // ========== ①「商品コード 読み込み」ボタン押下時 ==========
+  // ========== ②商品コード 読み込み (既存の処理) ==========
   const handleReadCode = async () => {
     if (!productCode) return; // 入力が空なら処理しない
 
@@ -84,10 +88,8 @@ export default function HomePage() {
     setProductError('');
 
     try {
-      // GET /api/products-by-code/{code} のエンドポイントを想定
       const res = await fetch(`${backendUrl}/api/products-by-code/${productCode}`);
       if (res.status === 404) {
-        // 見つからない場合
         setFoundProduct(null);
         setProductError('商品がマスタ未登録です');
         return;
@@ -105,7 +107,65 @@ export default function HomePage() {
     }
   };
 
-  // ========== ⑤「購入リストへ追加」ボタン押下時 ==========
+  // ========== ③ スキャンボタン (トグル) ==========
+  const handleToggleScan = () => {
+    if (!isScanning) {
+      setIsScanning(true);  // スキャン開始
+    } else {
+      // スキャン中なら停止
+      if (scannerControls) {
+        scannerControls.stop();
+        setScannerControls(null);
+      }
+      setIsScanning(false);
+    }
+  };
+
+  // ========== ④ useEffectでカメラ起動 & バーコード解析 ==========
+  useEffect(() => {
+    if (!isScanning) {
+      return;
+    }
+    const codeReader = new BrowserMultiFormatReader();
+    const videoElement = document.getElementById('video-preview') as HTMLVideoElement | null;
+    if (!videoElement) return;
+
+    codeReader.decodeFromVideoDevice(undefined, videoElement, (result, error, controls) => {
+      if (result) {
+        // バーコードを読み取れたら
+        const text = result.getText();
+        console.log('Scanned code:', text);
+        // カメラ停止
+        if (controls) {
+          controls.stop();
+          setScannerControls(null);
+        }
+        setIsScanning(false);
+        // 読み取ったコードを productCode にセット → すぐに handleReadCode 実行
+        setProductCode(text);
+        setTimeout(() => {
+          handleReadCode();
+        }, 0);
+      }
+    })
+    .then((controls) => {
+      setScannerControls(controls);
+    })
+    .catch((err) => {
+      console.error('Camera access error:', err);
+      alert('カメラにアクセスできません。HTTPSでアクセスしているかご確認ください。');
+      setIsScanning(false);
+    });
+
+    // クリーンアップ: コンポーネントがアンマウントされたらカメラ停止
+    return () => {
+      if (scannerControls) {
+        scannerControls.stop();
+      }
+    };
+  }, [isScanning]);
+
+  // ========== ⑤ 購入リストへ追加 ==========
   const handleAddToCart = async () => {
     if (!transactionId) {
       alert('取引IDが取得できていません');
@@ -117,8 +177,6 @@ export default function HomePage() {
     }
 
     try {
-      // 取引明細追加API
-      // DTL_IDはとりあえず cart.length+1 を割り当てる例
       const detailBody = {
         DTL_ID: cart.length + 1,
         PRD_ID: foundProduct.PRD_ID,
@@ -145,7 +203,7 @@ export default function HomePage() {
       };
       setCart((prev) => [...prev, newItem]);
 
-      // フォームリセット
+      // リセット
       setProductCode('');
       setFoundProduct(null);
       setProductError('');
@@ -155,18 +213,16 @@ export default function HomePage() {
     }
   };
 
-  // ========== ⑦「購入」ボタン押下時（合計金額を確認・表示） ==========
+  // ========== ⑥ 購入 ==========
   const handlePurchase = async () => {
     if (!transactionId) return;
     try {
-      // バックエンドで合計金額を再取得
       const res = await fetch(`${backendUrl}/api/transactions/${transactionId}`);
       if (!res.ok) {
         alert('取引情報の取得に失敗しました');
         return;
       }
       const data: Transaction = await res.json();
-      // 税込計算 (例: 10% 加算)
       const totalTaxIncluded = Math.round(data.TOTAL_AMT * 1.1);
       alert(`購入が完了しました！\n合計金額（税込）: ${totalTaxIncluded} 円`);
 
@@ -175,9 +231,6 @@ export default function HomePage() {
       setProductCode('');
       setFoundProduct(null);
       setProductError('');
-
-      // 必要に応じて新しい取引IDを再作成してもOK
-      // ...
     } catch (error) {
       console.error('購入エラー:', error);
     }
@@ -190,7 +243,22 @@ export default function HomePage() {
     <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto' }}>
       <h1>Web画面POSアプリ</h1>
 
-      {/* ②コード入力エリア */}
+      {/* ========== スキャン開始/停止 ボタン ========== */}
+      <button onClick={handleToggleScan} style={{ marginBottom: '8px' }}>
+        {isScanning ? 'スキャン停止' : 'バーコードスキャン'}
+      </button>
+      {isScanning && (
+        <div style={{ marginBottom: '8px' }}>
+          <p>カメラ起動中...</p>
+          <video
+            id="video-preview"
+            style={{ width: '100%', maxWidth: '400px', border: '1px solid #ccc' }}
+            autoPlay
+          />
+        </div>
+      )}
+
+      {/* ①コード入力エリア + 読み込みボタン */}
       <div style={{ marginBottom: '8px' }}>
         <input
           type="text"
@@ -199,7 +267,6 @@ export default function HomePage() {
           onChange={(e) => setProductCode(e.target.value)}
           style={{ width: '200px', marginRight: '8px' }}
         />
-        {/* ①読み込みボタン */}
         <button onClick={handleReadCode}>商品コード 読み込み</button>
       </div>
 
@@ -232,7 +299,7 @@ export default function HomePage() {
         追加
       </button>
 
-      {/* ⑥購入品リスト */}
+      {/* カート */}
       <div style={{ border: '1px solid #ccc', padding: '10px', marginBottom: '8px' }}>
         <h3>購入リスト</h3>
         {cart.length === 0 ? (
@@ -252,7 +319,7 @@ export default function HomePage() {
         <p style={{ marginTop: '8px' }}>合計金額(税抜): {totalWithoutTax}円</p>
       </div>
 
-      {/* ⑦購入ボタン */}
+      {/* 購入ボタン */}
       <button onClick={handlePurchase} style={{ fontSize: '1.1em', padding: '6px 16px' }}>
         購入
       </button>
