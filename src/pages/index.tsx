@@ -301,7 +301,7 @@ export default function HomePage() {
 
   return (
     <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto' }}>
-      <h1>購入ボタン押下時のみDBへ登録 (buildエラー回避版)</h1>
+      <h1>Web画面POSアプリ</h1>
 
       {/* (4) スキャンボタン */}
       <button onClick={handleToggleScan} style={{ marginBottom: '8px' }}>
